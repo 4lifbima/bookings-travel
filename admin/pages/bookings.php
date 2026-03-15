@@ -159,6 +159,7 @@ function openBookingDetail(code) {
             const d = res.data;
             const statusLabels = {pending:'Menunggu Konfirmasi',confirmed:'Dikonfirmasi',cancelled:'Dibatalkan',completed:'Selesai'};
             const payLabels = {transfer_bank:'Transfer Bank',qris:'QRIS',tunai:'Bayar di Tempat'};
+            const paymentProofUrl = d.payment_proof ? `../${d.payment_proof}` : '';
 
             let items = d.items.map(i => `<div class="flex justify-between py-2.5" style="border-bottom:1px solid var(--border);">
                 <div>
@@ -199,6 +200,12 @@ function openBookingDetail(code) {
                         <span class="font-extrabold text-base" style="color:var(--primary);">${d.total_amount_formatted}</span>
                     </div>
                 </div>
+                ${d.payment_method === 'transfer_bank' ? `<div>
+                    <div class="font-bold text-sm mb-2" style="color:var(--text);">Bukti Pembayaran</div>
+                    ${paymentProofUrl ? `<a href="${paymentProofUrl}" target="_blank" rel="noopener">
+                        <img src="${paymentProofUrl}" alt="Bukti Pembayaran" class="w-full rounded-xl" style="max-height:250px;object-fit:cover;border:1px solid var(--border);">
+                    </a>` : `<div class="text-xs" style="color:var(--text-muted);">Bukti pembayaran belum tersedia.</div>`}
+                </div>` : ''}
             </div>`);
 
             let actionBtns = '';

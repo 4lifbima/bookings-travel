@@ -51,12 +51,21 @@ switch ($action) {
 
         $conn->begin_transaction();
         try {
-            $stmt = $conn->prepare("UPDATE bookings SET status=? WHERE booking_code=?");
-            $stmt->bind_param('ss', $status, $code);
-            $stmt->execute();
+            $status_changed = true;
+            if ($status === 'confirmed') {
+                // Idempotent confirmation: only one request may move pending -> confirmed.
+                $stmt = $conn->prepare("UPDATE bookings SET status='confirmed' WHERE booking_code=? AND status='pending'");
+                $stmt->bind_param('s', $code);
+                $stmt->execute();
+                $status_changed = $stmt->affected_rows > 0;
+            } else {
+                $stmt = $conn->prepare("UPDATE bookings SET status=? WHERE booking_code=?");
+                $stmt->bind_param('ss', $status, $code);
+                $stmt->execute();
+            }
 
             // Generate ticket codes when confirming
-            if ($status === 'confirmed') {
+            if ($status === 'confirmed' && $status_changed) {
                 $items = $conn->query("SELECT * FROM booking_items WHERE booking_id={$booking['id']}");
                 while ($item = $items->fetch_assoc()) {
                     // Check if tickets already exist
@@ -69,6 +78,16 @@ switch ($action) {
                             $ins->execute();
                         }
                     }
+                }
+            }
+
+            if ($status === 'confirmed' && !$status_changed) {
+                $already = $conn->query("SELECT status FROM bookings WHERE booking_code='$code'")->fetch_assoc();
+                if ($already && $already['status'] === 'confirmed') {
+                    $conn->commit();
+                    echo json_encode(['status' => 'success', 'message' => 'Booking sudah berstatus dikonfirmasi']);
+                    $conn->close();
+                    break;
                 }
             }
 
@@ -97,16 +116,52 @@ switch ($action) {
         $filter = sanitize($_GET['filter'] ?? 'all');
         $where = $filter !== 'all' ? "WHERE t.status='$filter'" : '';
 
-        $result = $conn->query("SELECT t.*, b.booking_code, b.visit_date, u.name as user_name, tc.name as category_name
+        $result = $conn->query("SELECT
+                t.id,
+                t.ticket_code,
+                t.booking_id,
+                t.booking_item_id,
+                t.visitor_name,
+                t.status,
+                t.used_at,
+                t.created_at,
+                MAX(COALESCE(bi.quantity, 1)) as item_quantity,
+                MAX(b.booking_code) as booking_code,
+                MAX(b.visit_date) as visit_date,
+                MAX(COALESCE(u.name, '-')) as user_name,
+                MAX(COALESCE(tc.name, '-')) as category_name
             FROM tickets t
-            JOIN bookings b ON t.booking_id = b.id
-            JOIN booking_items bi ON t.booking_item_id = bi.id
-            JOIN ticket_categories tc ON bi.ticket_category_id = tc.id
-            JOIN users u ON b.user_id = u.id
+            LEFT JOIN bookings b ON t.booking_id = b.id
+            LEFT JOIN booking_items bi ON t.booking_item_id = bi.id
+            LEFT JOIN ticket_categories tc ON bi.ticket_category_id = tc.id
+            LEFT JOIN users u ON b.user_id = u.id
             $where
+            GROUP BY t.id, t.ticket_code, t.booking_id, t.booking_item_id, t.visitor_name, t.status, t.used_at, t.created_at
             ORDER BY t.created_at DESC");
+
+        if (!$result) {
+            echo json_encode(['status' => 'error', 'message' => 'Query tiket gagal: ' . $conn->error]);
+            $conn->close();
+            break;
+        }
+
         $data = [];
-        while ($row = $result->fetch_assoc()) $data[] = $row;
+        $item_counter = [];
+        while ($row = $result->fetch_assoc()) {
+            $item_key = (int)($row['booking_item_id'] ?? 0);
+            $allowed = max(1, (int)($row['item_quantity'] ?? 1));
+
+            if ($item_key > 0) {
+                $item_counter[$item_key] = ($item_counter[$item_key] ?? 0) + 1;
+                if ($item_counter[$item_key] > $allowed) {
+                    // Hide over-generated duplicates beyond ordered quantity.
+                    continue;
+                }
+            }
+
+            unset($row['item_quantity']);
+            $data[] = $row;
+        }
         echo json_encode(['status' => 'success', 'data' => $data]);
         $conn->close();
         break;

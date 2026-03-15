@@ -179,6 +179,23 @@ $conn->close();
                 </label>
                 <?php endforeach; ?>
             </div>
+
+            <div id="transfer-proof-box" class="mt-4 hidden">
+                <label class="block text-xs font-semibold mb-2" style="color:var(--text-muted);">UPLOAD BUKTI TRANSFER</label>
+                <label for="payment_proof" class="block cursor-pointer rounded-xl p-3" style="border:1.5px dashed var(--border);background:var(--bg-secondary);">
+                    <div class="flex items-start gap-3">
+                        <div class="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0" style="background:rgba(245,69,24,0.12);">
+                            <iconify-icon icon="mdi:image-plus-outline" width="20" style="color:var(--primary);"></iconify-icon>
+                        </div>
+                        <div class="flex-1 min-w-0">
+                            <div class="font-semibold text-sm" style="color:var(--text);">Upload screenshot bukti transfer</div>
+                            <div class="text-xs mt-1" style="color:var(--text-muted);">Format: JPG, PNG, WEBP. Ukuran harus di bawah 1MB.</div>
+                            <div class="text-xs mt-1 truncate" style="color:var(--primary);" id="payment-proof-name">Belum ada file dipilih</div>
+                        </div>
+                    </div>
+                </label>
+                <input type="file" id="payment_proof" accept="image/png,image/jpeg,image/webp" class="hidden">
+            </div>
         </div>
 
         <div class="fixed bottom-0 left-1/2 transform -translate-x-1/2 w-full pb-4 px-4 pt-3 z-30" 
@@ -219,6 +236,7 @@ $conn->close();
 <script>
 let selectedTickets = {};
 let selectedPayment = '';
+let transferProofFile = null;
 
 // Toggle ticket selection
 function toggleTicket(id) {
@@ -289,6 +307,9 @@ function goToStep3() {
     if (!$('input[name=payment_method]:checked').val()) {
         showToast('Pilih metode pembayaran', 'warning'); return;
     }
+    if (selectedPayment === 'transfer_bank' && !transferProofFile) {
+        showToast('Upload bukti pembayaran transfer (ukuran < 1MB)', 'warning'); return;
+    }
     if (!$('#visit_date').val()) {
         showToast('Pilih tanggal kunjungan', 'warning'); return;
     }
@@ -337,6 +358,15 @@ function selectPayment(method) {
     $(`#payment-label-${method}`).css('border-color', '#f54518');
     $(`#radio-${method}`).css({'border-color':'#f54518','background':'#f54518'}).html('<iconify-icon icon="mdi:check" width="10" style="color:white;"></iconify-icon>');
     $(`input[value=${method}]`).prop('checked', true);
+
+    if (method === 'transfer_bank') {
+        $('#transfer-proof-box').removeClass('hidden');
+    } else {
+        $('#transfer-proof-box').addClass('hidden');
+        transferProofFile = null;
+        $('#payment_proof').val('');
+        $('#payment-proof-name').text('Belum ada file dipilih');
+    }
 }
 
 function renderConfirmPreview() {
@@ -400,15 +430,21 @@ function submitBooking() {
         items.push({ category_id: id, quantity: selectedTickets[id].quantity });
     }
 
+    const formData = new FormData();
+    formData.append('action', 'create_booking');
+    formData.append('visit_date', $('#visit_date').val());
+    formData.append('payment_method', selectedPayment);
+    formData.append('items', JSON.stringify(items));
+    if (selectedPayment === 'transfer_bank' && transferProofFile) {
+        formData.append('payment_proof', transferProofFile);
+    }
+
     $.ajax({
         url: 'ajax/booking.php',
         method: 'POST',
-        data: {
-            action: 'create_booking',
-            visit_date: $('#visit_date').val(),
-            payment_method: selectedPayment,
-            items: JSON.stringify(items)
-        },
+        data: formData,
+        processData: false,
+        contentType: false,
         dataType: 'json',
         success: function(res) {
             if (res.status === 'success') {
@@ -445,6 +481,36 @@ function submitBooking() {
 
 // Check for pre-selected category
 $(document).ready(function() {
+    $('#payment_proof').on('change', function() {
+        const file = this.files && this.files[0] ? this.files[0] : null;
+        if (!file) {
+            transferProofFile = null;
+            $('#payment-proof-name').text('Belum ada file dipilih');
+            return;
+        }
+
+        const allowed = ['image/jpeg', 'image/png', 'image/webp'];
+        if (!allowed.includes(file.type)) {
+            showToast('Format file harus JPG, PNG, atau WEBP', 'error');
+            this.value = '';
+            transferProofFile = null;
+            $('#payment-proof-name').text('Belum ada file dipilih');
+            return;
+        }
+
+        const maxSizeExclusive = 1 * 1024 * 1024;
+        if (file.size >= maxSizeExclusive) {
+            showToast('Ukuran bukti transfer harus di bawah 1MB', 'error');
+            this.value = '';
+            transferProofFile = null;
+            $('#payment-proof-name').text('Belum ada file dipilih');
+            return;
+        }
+
+        transferProofFile = file;
+        $('#payment-proof-name').text(file.name);
+    });
+
     const urlParams = new URLSearchParams(window.location.search);
     const catId = urlParams.get('cat');
     if (catId) { setTimeout(() => toggleTicket(catId), 300); }

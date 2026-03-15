@@ -83,8 +83,75 @@ switch ($action) {
         if (!$name) { echo json_encode(['status'=>'error','message'=>'Nama wajib diisi']); exit; }
 
         $conn = db_connect();
-        $stmt = $conn->prepare("UPDATE users SET name=?, phone=? WHERE id=?");
-        $stmt->bind_param('ssi', $name, $phone, $_SESSION['user_id']);
+        $avatar_path = null;
+        $has_new_avatar = isset($_FILES['avatar']) && is_uploaded_file($_FILES['avatar']['tmp_name']);
+
+        if ($has_new_avatar) {
+            $file = $_FILES['avatar'];
+            if ($file['error'] !== UPLOAD_ERR_OK) {
+                echo json_encode(['status'=>'error','message'=>'Upload foto profil gagal']);
+                $conn->close();
+                exit;
+            }
+
+            $max_size = 5 * 1024 * 1024;
+            if ($file['size'] > $max_size) {
+                echo json_encode(['status'=>'error','message'=>'Ukuran foto profil maksimal 5MB']);
+                $conn->close();
+                exit;
+            }
+
+            $allowed_ext = ['jpg','jpeg','png','webp'];
+            $ext = strtolower(pathinfo($file['name'], PATHINFO_EXTENSION));
+            if (!in_array($ext, $allowed_ext, true)) {
+                echo json_encode(['status'=>'error','message'=>'Format foto profil harus JPG, PNG, atau WEBP']);
+                $conn->close();
+                exit;
+            }
+
+            $finfo = finfo_open(FILEINFO_MIME_TYPE);
+            $mime = finfo_file($finfo, $file['tmp_name']);
+            finfo_close($finfo);
+            $allowed_mime = ['image/jpeg','image/png','image/webp'];
+            if (!in_array($mime, $allowed_mime, true)) {
+                echo json_encode(['status'=>'error','message'=>'File foto profil tidak valid']);
+                $conn->close();
+                exit;
+            }
+
+            $upload_dir = __DIR__ . '/../storage/assets/profile/';
+            if (!is_dir($upload_dir) && !mkdir($upload_dir, 0775, true)) {
+                echo json_encode(['status'=>'error','message'=>'Folder foto profil tidak tersedia']);
+                $conn->close();
+                exit;
+            }
+
+            $filename = 'profile_' . (int)$_SESSION['user_id'] . '_' . time() . '_' . bin2hex(random_bytes(4)) . '.' . $ext;
+            $target = $upload_dir . $filename;
+            if (!move_uploaded_file($file['tmp_name'], $target)) {
+                echo json_encode(['status'=>'error','message'=>'Gagal menyimpan foto profil']);
+                $conn->close();
+                exit;
+            }
+
+            $avatar_path = 'storage/assets/profile/' . $filename;
+        }
+
+        if ($has_new_avatar) {
+            $current_q = $conn->query("SELECT avatar FROM users WHERE id=" . (int)$_SESSION['user_id']);
+            $current = $current_q ? $current_q->fetch_assoc() : null;
+            if ($current && !empty($current['avatar']) && strpos($current['avatar'], 'storage/assets/profile/') === 0) {
+                $old_file = __DIR__ . '/../' . $current['avatar'];
+                if (is_file($old_file)) unlink($old_file);
+            }
+
+            $stmt = $conn->prepare("UPDATE users SET name=?, phone=?, avatar=? WHERE id=?");
+            $stmt->bind_param('sssi', $name, $phone, $avatar_path, $_SESSION['user_id']);
+        } else {
+            $stmt = $conn->prepare("UPDATE users SET name=?, phone=? WHERE id=?");
+            $stmt->bind_param('ssi', $name, $phone, $_SESSION['user_id']);
+        }
+
         if ($stmt->execute()) {
             $_SESSION['user_name'] = $name;
             echo json_encode(['status'=>'success','message'=>'Profil berhasil diperbarui']);

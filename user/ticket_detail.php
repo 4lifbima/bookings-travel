@@ -77,6 +77,7 @@ $(document).ready(function() {
             }
 
             const payLabels = {transfer_bank:'Transfer Bank', qris:'QRIS', tunai:'Bayar di Tempat'};
+            const paymentProofUrl = d.payment_proof ? `<?php echo BASE_URL; ?>/${d.payment_proof}` : '';
 
             $('#detail-container').html(`<div class="space-y-4 fade-in">
                 <div class="card p-5" style="border-color:${color}30;">
@@ -110,6 +111,13 @@ $(document).ready(function() {
                         <span class="font-extrabold text-base" style="color:var(--primary);">${d.total_amount_formatted}</span>
                     </div>
                 </div>
+
+                ${d.payment_method === 'transfer_bank' ? `<div class="card p-4">
+                    <div class="font-bold text-sm mb-2" style="color:var(--text);">Bukti Pembayaran</div>
+                    ${paymentProofUrl ? `<a href="${paymentProofUrl}" target="_blank" rel="noopener">
+                        <img src="${paymentProofUrl}" alt="Bukti Pembayaran" class="w-full rounded-xl" style="border:1px solid var(--border);max-height:260px;object-fit:cover;">
+                    </a>` : `<div class="text-xs" style="color:var(--text-muted);">Bukti pembayaran belum diunggah.</div>`}
+                </div>` : ''}
 
                 ${d.tickets && d.tickets.length > 0 ? `<div class="card p-4">
                     <div class="flex items-center gap-2 mb-3">

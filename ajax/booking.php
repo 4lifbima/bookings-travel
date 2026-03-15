@@ -33,6 +33,42 @@ switch ($action) {
             echo json_encode(['status'=>'error','message'=>'Tanggal kunjungan minimal 24 jam dari sekarang']); exit;
         }
 
+        $payment_proof_path = null;
+        if ($payment_method === 'transfer_bank') {
+            if (!isset($_FILES['payment_proof']) || !is_uploaded_file($_FILES['payment_proof']['tmp_name'])) {
+                echo json_encode(['status'=>'error','message'=>'Bukti pembayaran transfer wajib diupload']);
+                exit;
+            }
+
+            $file = $_FILES['payment_proof'];
+            if ($file['error'] !== UPLOAD_ERR_OK) {
+                echo json_encode(['status'=>'error','message'=>'Upload bukti pembayaran gagal']);
+                exit;
+            }
+
+            $max_size_exclusive = 1 * 1024 * 1024; // Must be < 1MB
+            if ($file['size'] >= $max_size_exclusive) {
+                echo json_encode(['status'=>'error','message'=>'Ukuran bukti pembayaran harus di bawah 1MB']);
+                exit;
+            }
+
+            $allowed_ext = ['jpg','jpeg','png','webp'];
+            $ext = strtolower(pathinfo($file['name'], PATHINFO_EXTENSION));
+            if (!in_array($ext, $allowed_ext, true)) {
+                echo json_encode(['status'=>'error','message'=>'Format bukti pembayaran harus JPG, PNG, atau WEBP']);
+                exit;
+            }
+
+            $finfo = finfo_open(FILEINFO_MIME_TYPE);
+            $mime = finfo_file($finfo, $file['tmp_name']);
+            finfo_close($finfo);
+            $allowed_mime = ['image/jpeg','image/png','image/webp'];
+            if (!in_array($mime, $allowed_mime, true)) {
+                echo json_encode(['status'=>'error','message'=>'File bukti pembayaran tidak valid']);
+                exit;
+            }
+        }
+
         $conn = db_connect();
 
         // Calculate totals
@@ -61,11 +97,28 @@ switch ($action) {
         $booking_code = generate_booking_code();
         $user_id = $_SESSION['user_id'];
 
-        $stmt = $conn->prepare("INSERT INTO bookings (booking_code, user_id, visit_date, total_tickets, total_amount, payment_method, status) VALUES (?,?,?,?,?,'?','pending')");
+        if ($payment_method === 'transfer_bank') {
+            $upload_dir = __DIR__ . '/../storage/assets/api/tickets/';
+            if (!is_dir($upload_dir) && !mkdir($upload_dir, 0775, true)) {
+                echo json_encode(['status'=>'error','message'=>'Folder upload bukti pembayaran tidak tersedia']);
+                $conn->close();
+                exit;
+            }
+
+            $proof_filename = 'proof_' . strtolower($booking_code) . '_' . time() . '_' . bin2hex(random_bytes(4)) . '.' . $ext;
+            $proof_target = $upload_dir . $proof_filename;
+            if (!move_uploaded_file($_FILES['payment_proof']['tmp_name'], $proof_target)) {
+                echo json_encode(['status'=>'error','message'=>'Gagal menyimpan bukti pembayaran']);
+                $conn->close();
+                exit;
+            }
+            $payment_proof_path = 'storage/assets/api/tickets/' . $proof_filename;
+        }
+
         $conn->begin_transaction();
         try {
-            $stmt = $conn->prepare("INSERT INTO bookings (booking_code, user_id, visit_date, total_tickets, total_amount, payment_method, status) VALUES (?,?,?,?,?,?,'pending')");
-            $stmt->bind_param('sissds', $booking_code, $user_id, $visit_date, $total_tickets, $total_amount, $payment_method);
+            $stmt = $conn->prepare("INSERT INTO bookings (booking_code, user_id, visit_date, total_tickets, total_amount, payment_method, payment_proof, status) VALUES (?,?,?,?,?,?,?,'pending')");
+            $stmt->bind_param('sissdss', $booking_code, $user_id, $visit_date, $total_tickets, $total_amount, $payment_method, $payment_proof_path);
             $stmt->execute();
             $booking_id = $conn->insert_id;
 
@@ -79,6 +132,10 @@ switch ($action) {
             echo json_encode(['status'=>'success','message'=>'Pesanan berhasil dibuat','booking_code'=>$booking_code]);
         } catch (Exception $e) {
             $conn->rollback();
+            if ($payment_proof_path) {
+                $abs_path = __DIR__ . '/../' . $payment_proof_path;
+                if (is_file($abs_path)) unlink($abs_path);
+            }
             echo json_encode(['status'=>'error','message'=>'Gagal membuat pesanan: '.$e->getMessage()]);
         }
         $conn->close();

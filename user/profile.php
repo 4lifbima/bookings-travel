@@ -6,6 +6,8 @@ $user_id = $_SESSION['user_id'];
 $user = $conn->query("SELECT * FROM users WHERE id=$user_id")->fetch_assoc();
 $stats = $conn->query("SELECT COUNT(*) as total, SUM(total_amount) as spent FROM bookings WHERE user_id=$user_id AND status!='cancelled'")->fetch_assoc();
 $conn->close();
+
+$avatar_url = !empty($user['avatar']) ? BASE_URL . '/' . ltrim($user['avatar'], '/') : '';
 ?>
 <header class="app-header px-5 py-4">
     <div class="flex items-center gap-4">
@@ -23,9 +25,18 @@ $conn->close();
     <!-- Profile Header -->
     <div class="hero-gradient px-5 pt-6 pb-16 relative">
         <div class="flex flex-col items-center">
-            <div class="w-20 h-20 rounded-3xl flex items-center justify-center mb-3" style="background:rgba(255,255,255,0.25);">
-                <iconify-icon icon="mdi:account" width="40" style="color:white;"></iconify-icon>
-            </div>
+            <label for="avatar_input" class="w-20 h-20 rounded-3xl flex items-center justify-center mb-3 overflow-hidden cursor-pointer relative" style="background:rgba(255,255,255,0.25);">
+                <?php if ($avatar_url): ?>
+                <img src="<?php echo htmlspecialchars($avatar_url); ?>" alt="Foto Profil" id="avatarPreview" class="w-full h-full object-cover">
+                <?php else: ?>
+                <img src="" alt="Foto Profil" id="avatarPreview" class="w-full h-full object-cover hidden">
+                <iconify-icon icon="mdi:account" width="40" style="color:white;" id="avatarFallback"></iconify-icon>
+                <?php endif; ?>
+                <span class="absolute bottom-1 right-1 w-7 h-7 rounded-lg flex items-center justify-center" style="background:rgba(17,24,39,0.65);">
+                    <iconify-icon icon="mdi:camera-outline" width="14" style="color:white;"></iconify-icon>
+                </span>
+            </label>
+            <input type="file" id="avatar_input" name="avatar" accept="image/png,image/jpeg,image/webp" class="hidden">
             <div class="text-white font-extrabold text-xl"><?php echo htmlspecialchars($user['name']); ?></div>
             <div style="color:rgba(255,255,255,0.8);" class="text-sm"><?php echo htmlspecialchars($user['email']); ?></div>
         </div>
@@ -126,13 +137,51 @@ $conn->close();
 </nav>
 
 <script>
+let selectedAvatarFile = null;
+
 $('#profileForm').on('submit', function(e) {
     e.preventDefault();
-    const data = { action: 'update_profile', name: $('[name=name]').val(), phone: $('[name=phone]').val() };
+    const formData = new FormData();
+    formData.append('action', 'update_profile');
+    formData.append('name', $('[name=name]').val());
+    formData.append('phone', $('[name=phone]').val());
+    if (selectedAvatarFile) {
+        formData.append('avatar', selectedAvatarFile);
+    }
+
     showLoading();
-    $.ajax({ url: 'ajax/auth.php', method: 'POST', data, dataType: 'json',
+    $.ajax({ url: 'ajax/auth.php', method: 'POST', data: formData, processData: false, contentType: false, dataType: 'json',
         success: function(res) { hideLoading(); showToast(res.message, res.status === 'success' ? 'success' : 'error'); }
     });
+});
+
+$('#avatar_input').on('change', function() {
+    const file = this.files && this.files[0] ? this.files[0] : null;
+    if (!file) {
+        selectedAvatarFile = null;
+        return;
+    }
+
+    const allowed = ['image/jpeg', 'image/png', 'image/webp'];
+    if (!allowed.includes(file.type)) {
+        showToast('Format foto harus JPG, PNG, atau WEBP', 'error');
+        this.value = '';
+        selectedAvatarFile = null;
+        return;
+    }
+
+    const maxSize = 5 * 1024 * 1024;
+    if (file.size > maxSize) {
+        showToast('Ukuran foto maksimal 5MB', 'error');
+        this.value = '';
+        selectedAvatarFile = null;
+        return;
+    }
+
+    selectedAvatarFile = file;
+    const previewUrl = URL.createObjectURL(file);
+    $('#avatarPreview').attr('src', previewUrl).removeClass('hidden');
+    $('#avatarFallback').addClass('hidden');
 });
 
 $('#passForm').on('submit', function(e) {

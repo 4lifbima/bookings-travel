@@ -73,15 +73,28 @@ function loadTickets(filter) {
         success: function(res) {
             hideLoading();
             ticketTable.clear();
-            if (res.status === 'success') {
-                ticketTable.rows.add(res.data).draw();
+            if (res && res.status === 'success' && Array.isArray(res.data)) {
+                const seen = new Set();
+                const uniqueRows = res.data.filter(row => {
+                    const key = row.id ? `id-${row.id}` : `code-${row.ticket_code}`;
+                    if (seen.has(key)) return false;
+                    seen.add(key);
+                    return true;
+                });
+                ticketTable.rows.add(uniqueRows).draw();
+
+                const removed = res.data.length - uniqueRows.length;
+                if (removed > 0) {
+                    console.warn('Duplicate ticket rows removed:', removed);
+                }
             } else {
-                showToast('Gagal memuat: ' + res.message, 'error');
+                showToast('Gagal memuat: ' + ((res && res.message) ? res.message : 'Respons tidak valid'), 'error');
+                console.error('get_tickets invalid response:', res);
             }
         },
         error: function(xhr) {
             hideLoading();
-            showToast('Gagal memuat data tiket', 'error');
+            showToast('Gagal memuat data tiket (' + xhr.status + ')', 'error');
             console.error('AJAX Error:', xhr.responseText);
         }
     });
